@@ -10,7 +10,8 @@ try:
     from second.core import box_ops_cc
 except:
     current_dir = Path(__file__).resolve().parents[0]
-    box_ops_cc = load_pb11(["./cc/box_ops.cc"], current_dir / "box_ops_cc.so", current_dir)
+    box_ops_cc = load_pb11(["./cc/box_ops.cc"], current_dir / "box_ops_cc.so", current_dir,
+     includes=["/zfsauton2/home/anirudds/.local/boost_1_62_0"])
 
 
 def riou_cc(rbboxes, qrbboxes, standup_thresh=0.0):

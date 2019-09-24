@@ -15,6 +15,7 @@ except:
         ["../cc/nms/nms_kernel.cu.cc", "../cc/nms/nms.cc"],
         current_dir / "nms.so",
         current_dir,
+        includes=["/zfsauton2/home/anirudds/.local/boost_1_62_0"],
         cuda=True)
     from second.core.non_max_suppression.nms import (
         non_max_suppression_cpu, rotate_non_max_suppression_cpu)

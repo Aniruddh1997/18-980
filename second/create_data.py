@@ -63,10 +63,10 @@ def create_kitti_info_file(data_path,
                            save_path=None,
                            create_trainval=False,
                            relative_path=True):
-    train_img_ids = _read_imageset_file("./data/ImageSets/train.txt")
-    val_img_ids = _read_imageset_file("./data/ImageSets/val.txt")
-    trainval_img_ids = _read_imageset_file("./data/ImageSets/trainval.txt")
-    test_img_ids = _read_imageset_file("./data/ImageSets/test.txt")
+    train_img_ids = _read_imageset_file("./second/data/ImageSets/train.txt")
+    val_img_ids = _read_imageset_file("./second/data/ImageSets/val.txt")
+    trainval_img_ids = _read_imageset_file("./second/data/ImageSets/trainval.txt")
+    test_img_ids = _read_imageset_file("./second/data/ImageSets/test.txt")
 
     print("Generate info. this may take several minutes.")
     if save_path is None:
@@ -155,6 +155,7 @@ def _create_reduced_point_cloud(data_path,
 
         if save_path is None:
             save_filename = v_path.parent.parent / (v_path.parent.stem + "_reduced") / v_path.name
+            print (save_filename)
             # save_filename = str(v_path) + '_reduced'
             if back:
                 save_filename += "_back"
