@@ -3,7 +3,7 @@ from enum import Enum
 from functools import reduce
 
 import numpy as np
-import sparseconvnet as scn
+# import sparseconvnet as scn
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -189,75 +189,75 @@ class VoxelFeatureExtractorV2(nn.Module):
         return voxelwise
 
 
-class SparseMiddleExtractor(nn.Module):
-    def __init__(self,
-                 output_shape,
-                 use_norm=True,
-                 num_input_features=128,
-                 num_filters_down1=[64],
-                 num_filters_down2=[64, 64],
-                 name='SparseMiddleExtractor'):
-        super(SparseMiddleExtractor, self).__init__()
-        self.name = name
-        if use_norm:
-            BatchNorm1d = change_default_args(
-                eps=1e-3, momentum=0.01)(nn.BatchNorm1d)
-            Linear = change_default_args(bias=False)(nn.Linear)
-        else:
-            BatchNorm1d = Empty
-            Linear = change_default_args(bias=True)(nn.Linear)
-        sparse_shape = np.array(output_shape[1:4]) + [1, 0, 0]
-        # sparse_shape[0] = 11
-        print(sparse_shape)
-        self.scn_input = scn.InputLayer(3, sparse_shape.tolist())
-        self.voxel_output_shape = output_shape
-        middle_layers = []
+# class SparseMiddleExtractor(nn.Module):
+#     def __init__(self,
+#                  output_shape,
+#                  use_norm=True,
+#                  num_input_features=128,
+#                  num_filters_down1=[64],
+#                  num_filters_down2=[64, 64],
+#                  name='SparseMiddleExtractor'):
+#         super(SparseMiddleExtractor, self).__init__()
+#         self.name = name
+#         if use_norm:
+#             BatchNorm1d = change_default_args(
+#                 eps=1e-3, momentum=0.01)(nn.BatchNorm1d)
+#             Linear = change_default_args(bias=False)(nn.Linear)
+#         else:
+#             BatchNorm1d = Empty
+#             Linear = change_default_args(bias=True)(nn.Linear)
+#         sparse_shape = np.array(output_shape[1:4]) + [1, 0, 0]
+#         # sparse_shape[0] = 11
+#         print(sparse_shape)
+#         self.scn_input = scn.InputLayer(3, sparse_shape.tolist())
+#         self.voxel_output_shape = output_shape
+#         middle_layers = []
 
-        num_filters = [num_input_features] + num_filters_down1
-        # num_filters = [64] + num_filters_down1
-        filters_pairs_d1 = [[num_filters[i], num_filters[i + 1]]
-                            for i in range(len(num_filters) - 1)]
+#         num_filters = [num_input_features] + num_filters_down1
+#         # num_filters = [64] + num_filters_down1
+#         filters_pairs_d1 = [[num_filters[i], num_filters[i + 1]]
+#                             for i in range(len(num_filters) - 1)]
 
-        for i, o in filters_pairs_d1:
-            middle_layers.append(scn.SubmanifoldConvolution(3, i, o, 3, False))
-            middle_layers.append(scn.BatchNormReLU(o, eps=1e-3, momentum=0.99))
-        middle_layers.append(
-            scn.Convolution(
-                3,
-                num_filters[-1],
-                num_filters[-1], (3, 1, 1), (2, 1, 1),
-                bias=False))
-        middle_layers.append(
-            scn.BatchNormReLU(num_filters[-1], eps=1e-3, momentum=0.99))
-        # assert len(num_filters_down2) > 0
-        if len(num_filters_down1) == 0:
-            num_filters = [num_filters[-1]] + num_filters_down2
-        else:
-            num_filters = [num_filters_down1[-1]] + num_filters_down2
-        filters_pairs_d2 = [[num_filters[i], num_filters[i + 1]]
-                            for i in range(len(num_filters) - 1)]
-        for i, o in filters_pairs_d2:
-            middle_layers.append(scn.SubmanifoldConvolution(3, i, o, 3, False))
-            middle_layers.append(scn.BatchNormReLU(o, eps=1e-3, momentum=0.99))
-        middle_layers.append(
-            scn.Convolution(
-                3,
-                num_filters[-1],
-                num_filters[-1], (3, 1, 1), (2, 1, 1),
-                bias=False))
-        middle_layers.append(
-            scn.BatchNormReLU(num_filters[-1], eps=1e-3, momentum=0.99))
-        middle_layers.append(scn.SparseToDense(3, num_filters[-1]))
-        self.middle_conv = Sequential(*middle_layers)
+#         for i, o in filters_pairs_d1:
+#             middle_layers.append(scn.SubmanifoldConvolution(3, i, o, 3, False))
+#             middle_layers.append(scn.BatchNormReLU(o, eps=1e-3, momentum=0.99))
+#         middle_layers.append(
+#             scn.Convolution(
+#                 3,
+#                 num_filters[-1],
+#                 num_filters[-1], (3, 1, 1), (2, 1, 1),
+#                 bias=False))
+#         middle_layers.append(
+#             scn.BatchNormReLU(num_filters[-1], eps=1e-3, momentum=0.99))
+#         # assert len(num_filters_down2) > 0
+#         if len(num_filters_down1) == 0:
+#             num_filters = [num_filters[-1]] + num_filters_down2
+#         else:
+#             num_filters = [num_filters_down1[-1]] + num_filters_down2
+#         filters_pairs_d2 = [[num_filters[i], num_filters[i + 1]]
+#                             for i in range(len(num_filters) - 1)]
+#         for i, o in filters_pairs_d2:
+#             middle_layers.append(scn.SubmanifoldConvolution(3, i, o, 3, False))
+#             middle_layers.append(scn.BatchNormReLU(o, eps=1e-3, momentum=0.99))
+#         middle_layers.append(
+#             scn.Convolution(
+#                 3,
+#                 num_filters[-1],
+#                 num_filters[-1], (3, 1, 1), (2, 1, 1),
+#                 bias=False))
+#         middle_layers.append(
+#             scn.BatchNormReLU(num_filters[-1], eps=1e-3, momentum=0.99))
+#         middle_layers.append(scn.SparseToDense(3, num_filters[-1]))
+#         self.middle_conv = Sequential(*middle_layers)
 
-    def forward(self, voxel_features, coors, batch_size):
-        # coors[:, 1] += 1
-        coors = coors.int()[:, [1, 2, 3, 0]]
-        ret = self.scn_input((coors.cpu(), voxel_features, batch_size))
-        ret = self.middle_conv(ret)
-        N, C, D, H, W = ret.shape
-        ret = ret.view(N, C * D, H, W)
-        return ret
+#     def forward(self, voxel_features, coors, batch_size):
+#         # coors[:, 1] += 1
+#         coors = coors.int()[:, [1, 2, 3, 0]]
+#         ret = self.scn_input((coors.cpu(), voxel_features, batch_size))
+#         ret = self.middle_conv(ret)
+#         N, C, D, H, W = ret.shape
+#         ret = ret.view(N, C * D, H, W)
+#         return ret
 
 
 class ZeroPad3d(nn.ConstantPad3d):
@@ -494,7 +494,7 @@ class VoxelNet(nn.Module):
                  vfe_class_name="VoxelFeatureExtractor",
                  vfe_num_filters=[32, 128],
                  with_distance=False,
-                 middle_class_name="SparseMiddleExtractor",
+                 middle_class_name="MiddleExtractor",
                  middle_num_filters_d1=[64],
                  middle_num_filters_d2=[64, 64],
                  rpn_class_name="RPN",
@@ -593,8 +593,8 @@ class VoxelNet(nn.Module):
             num_rpn_input_filters = self.middle_feature_extractor.nchannels
         else:
             mid_class_dict = {
-                "MiddleExtractor": MiddleExtractor,
-                "SparseMiddleExtractor": SparseMiddleExtractor,
+                "MiddleExtractor": MiddleExtractor
+                # "SparseMiddleExtractor": SparseMiddleExtractor,
             }
             mid_class = mid_class_dict[middle_class_name]
             self.middle_feature_extractor = mid_class(
