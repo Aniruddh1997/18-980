@@ -671,6 +671,7 @@ class VoxelNet(nn.Module):
         else:
             spatial_features = self.middle_feature_extractor(
                 voxel_features, coors, batch_size_dev)
+
             if self._use_bev:
                 preds_dict = self.rpn(spatial_features, example["bev_map"])
             else:
@@ -679,6 +680,7 @@ class VoxelNet(nn.Module):
         # preds_dict["spatial_features"] = spatial_features
         box_preds = preds_dict["box_preds"]
         cls_preds = preds_dict["cls_preds"]
+        
         self._total_forward_time += time.time() - t
         if self.training:
             labels = example['labels']
@@ -908,7 +910,8 @@ class VoxelNet(nn.Module):
                 label_preds = selected_labels
                 if self._use_direction_classifier:
                     dir_labels = selected_dir_labels
-                    opp_labels = (box_preds[..., -1] > 0) ^ dir_labels.byte()
+                    # changed this line from .byte() to .bool()
+                    opp_labels = (box_preds[..., -1] > 0) ^ dir_labels.bool()
                     box_preds[..., -1] += torch.where(
                         opp_labels,
                         torch.tensor(np.pi).type_as(box_preds),
@@ -1058,6 +1061,7 @@ def create_loss(loc_loss_ftor,
         cls_preds = cls_preds.view(batch_size, -1, num_class)
     else:
         cls_preds = cls_preds.view(batch_size, -1, num_class + 1)
+
     cls_targets = cls_targets.squeeze(-1)
     one_hot_targets = torchplus.nn.one_hot(
         cls_targets, depth=num_class + 1, dtype=box_preds.dtype)
@@ -1070,6 +1074,7 @@ def create_loss(loc_loss_ftor,
         box_preds, reg_targets, weights=reg_weights)  # [N, M]
     cls_losses = cls_loss_ftor(
         cls_preds, one_hot_targets, weights=cls_weights)  # [N, M]
+
     return loc_losses, cls_losses
 
 

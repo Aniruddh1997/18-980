@@ -47,7 +47,6 @@ class PFNLayer(nn.Module):
         self.norm = BatchNorm1d(self.units)
 
     def forward(self, inputs):
-
         x = self.linear(inputs)
         x = self.norm(x.permute(0, 2, 1).contiguous()).permute(0, 2, 1).contiguous()
         x = F.relu(x)
@@ -110,7 +109,6 @@ class PillarFeatureNet(nn.Module):
         self.y_offset = self.vy / 2 + pc_range[1]
 
     def forward(self, features, num_voxels, coors):
-
         # Find distance of x, y, and z from cluster center
         points_mean = features[:, :, :3].sum(dim=1, keepdim=True) / num_voxels.type_as(features).view(-1, 1, 1)
         f_cluster = features[:, :, :3] - points_mean
@@ -161,7 +159,6 @@ class PointPillarsScatter(nn.Module):
         self.nchannels = num_input_features
 
     def forward(self, voxel_features, coords, batch_size):
-
         # batch_canvas will be the final output.
         batch_canvas = []
         for batch_itt in range(batch_size):
@@ -179,7 +176,6 @@ class PointPillarsScatter(nn.Module):
 
             # Now scatter the blob back to the canvas.
             canvas[:, indices] = voxels
-
             # Append to a list for later stacking.
             batch_canvas.append(canvas)
 
@@ -188,5 +184,4 @@ class PointPillarsScatter(nn.Module):
 
         # Undo the column stacking to final 4-dim tensor
         batch_canvas = batch_canvas.view(batch_size, self.nchannels, self.ny, self.nx)
-
         return batch_canvas
