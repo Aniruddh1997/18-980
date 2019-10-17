@@ -494,13 +494,21 @@ def predict_kitti_to_anno(net,
         image_shape = batch_image_shape[i]
         img_idx = preds_dict["image_idx"]
         if preds_dict["bbox"] is not None:
-            filter_id = preds_dict["scores"] > 0.25 
+        	# ==================extra post processing done============================
+            filter_id = preds_dict["scores"] > 0.3
             box_2d_preds = preds_dict["bbox"][filter_id].detach().cpu().numpy()
             box_preds = preds_dict["box3d_camera"][filter_id].detach().cpu().numpy()
             scores = preds_dict["scores"][filter_id].detach().cpu().numpy()
             box_preds_lidar = preds_dict["box3d_lidar"][filter_id].detach().cpu().numpy()
-            # write pred to file
             label_preds = preds_dict["label_preds"][filter_id].detach().cpu().numpy()
+            # =========================================================================
+
+            # box_2d_preds = preds_dict["bbox"].detach().cpu().numpy()
+            # box_preds = preds_dict["box3d_camera"].detach().cpu().numpy()
+            # scores = preds_dict["scores"].detach().cpu().numpy()
+            # box_preds_lidar = preds_dict["box3d_lidar"].detach().cpu().numpy()
+            # label_preds = preds_dict["label_preds"].detach().cpu().numpy()
+            
             # label_preds = np.zeros([box_2d_preds.shape[0]], dtype=np.int32)
             anno = kitti.get_start_result_anno()
             num_example = 0
