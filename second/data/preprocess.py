@@ -12,6 +12,9 @@ from second.core.geometry import points_in_convex_polygon_3d_jit
 from second.core.point_cloud.bev_ops import points_to_bev
 from second.data import kitti_common as kitti
 
+# from second.pytorch.utils import _alpha_to_8
+from second.pytorch.utils import gaussian_radius, draw_umich_gaussian, draw_msra_gaussian
+
 
 def merge_second_batch(batch_list, _unused=False):
     example_merged = defaultdict(list)
@@ -48,7 +51,7 @@ def prep_pointcloud(input_dict,
                     target_assigner,
                     db_sampler=None,
                     max_voxels=20000,
-                    class_names=['Car'],
+                    class_names=['Car', "Cyclist", "Pedestrian"],
                     remove_outside_points=False,
                     training=True,
                     create_targets=True,
@@ -79,11 +82,20 @@ def prep_pointcloud(input_dict,
                     min_gt_point_dict=None,
                     bev_only=False,
                     use_group_id=False,
-                    out_dtype=np.float32):
+                    out_dtype=np.float32,
+                    max_objs=300,
+                    length = 248 ,
+                    width = 216):
     """convert point cloud to voxels, create targets if ground truths 
     exists.
     """
     points = input_dict["points"]
+    pc_range = voxel_generator.point_cloud_range
+
+    hist, bin_edges = np.histogram(points[:,2], bins=10, range=(pc_range[2], pc_range[5]))
+    idx = np.argmax(hist)
+    ground = (bin_edges[idx] + bin_edges[idx+1]) / 2
+    
     if training:
         gt_boxes = input_dict["gt_boxes"]
         gt_names = input_dict["gt_names"]
@@ -182,7 +194,7 @@ def prep_pointcloud(input_dict,
             used_point_axes = list(range(num_point_features))
             used_point_axes.pop(3)
             points = points[:, used_point_axes]
-        pc_range = voxel_generator.point_cloud_range
+        
         if bev_only:  # set z and h to limits
             gt_boxes[:, 2] = pc_range[2]
             gt_boxes[:, 5] = pc_range[5] - pc_range[2]
@@ -227,11 +239,9 @@ def prep_pointcloud(input_dict,
         # shuffle is a little slow.
         np.random.shuffle(points)
 
-    # [0, -40, -3, 70.4, 40, 1]
     voxel_size = voxel_generator.voxel_size
     pc_range = voxel_generator.point_cloud_range
     grid_size = voxel_generator.grid_size
-    # [352, 400]
 
     voxels, coordinates, num_points = voxel_generator.generate(
         points, max_voxels)
@@ -240,44 +250,15 @@ def prep_pointcloud(input_dict,
         'voxels': voxels,
         'num_points': num_points,
         'coordinates': coordinates,
-        "num_voxels": np.array([voxels.shape[0]], dtype=np.int64)
+        "num_voxels": np.array([voxels.shape[0]], dtype=np.int64),
+        "ground" : ground
     }
     example.update({
         'rect': rect,
         'Trv2c': Trv2c,
         'P2': P2,
     })
-    # if not lidar_input:
-    feature_map_size = grid_size[:2] // out_size_factor
-    feature_map_size = [*feature_map_size, 1][::-1]
-    if anchor_cache is not None:
-        anchors = anchor_cache["anchors"]
-        anchors_bv = anchor_cache["anchors_bv"]
-        matched_thresholds = anchor_cache["matched_thresholds"]
-        unmatched_thresholds = anchor_cache["unmatched_thresholds"]
-    else:
-        ret = target_assigner.generate_anchors(feature_map_size)
-        anchors = ret["anchors"]
-        anchors = anchors.reshape([-1, 7])
-        matched_thresholds = ret["matched_thresholds"]
-        unmatched_thresholds = ret["unmatched_thresholds"]
-        anchors_bv = box_np_ops.rbbox2d_to_near_bbox(
-            anchors[:, [0, 1, 3, 4, 6]])
-    example["anchors"] = anchors
-    # print("debug", anchors.shape, matched_thresholds.shape)
-    # anchors_bv = anchors_bv.reshape([-1, 4])
-    anchors_mask = None
-    if anchor_area_threshold >= 0:
-        coors = coordinates
-        dense_voxel_map = box_np_ops.sparse_sum_for_anchors_mask(
-            coors, tuple(grid_size[::-1][1:]))
-        dense_voxel_map = dense_voxel_map.cumsum(0)
-        dense_voxel_map = dense_voxel_map.cumsum(1)
-        anchors_area = box_np_ops.fused_get_anchors_area(
-            dense_voxel_map, anchors_bv, voxel_size, pc_range, grid_size)
-        anchors_mask = anchors_area > anchor_area_threshold
-        # example['anchors_mask'] = anchors_mask.astype(np.uint8)
-        example['anchors_mask'] = anchors_mask
+
     if generate_bev:
         bev_vxsize = voxel_size.copy()
         bev_vxsize[:2] /= 2
@@ -285,21 +266,78 @@ def prep_pointcloud(input_dict,
         bev_map = points_to_bev(points, bev_vxsize, pc_range,
                                 without_reflectivity)
         example["bev_map"] = bev_map
-    if not training:
-        return example
-    if create_targets:
-        targets_dict = target_assigner.assign(
-            anchors,
-            gt_boxes,
-            anchors_mask,
-            gt_classes=gt_classes,
-            matched_thresholds=matched_thresholds,
-            unmatched_thresholds=unmatched_thresholds)
+
+    #============================ NEW CODE ===================================
+    if training:
+        num_classes = len(class_names)
+        hm = np.zeros((num_classes, length, width), dtype=np.float32)
+        # wh = np.zeros((max_objs, 2), dtype=np.float32)
+        reg = np.zeros((max_objs, 2), dtype=np.float32)
+        rotbin = np.zeros((max_objs, 2), dtype=np.int64)
+        rotres = np.zeros((max_objs, 2), dtype=np.float32)
+        dim = np.zeros((max_objs, 3), dtype=np.float32)
+        ind = np.zeros((max_objs), dtype=np.int64)
+        reg_mask = np.zeros((max_objs), dtype=np.uint8)
+        rot_mask = np.zeros((max_objs), dtype=np.uint8)
+
+        num_objs = min(len(gt_boxes), max_objs)
+        draw_gaussian = draw_msra_gaussian 
+        # if self.opt.mse_loss else draw_umich_gaussian
+
+        gt_det = []
+        xmin, ymin, _, xmax, ymax,_ = pc_range
+        for k in range(num_objs):
+            box = gt_boxes[k]
+            box[0] = np.clip(box[0], xmin, xmax)
+            box[1] = np.clip(box[1], ymin, ymax)
+            alpha = box[6] - np.arctan2(-box[1], box[0])
+            cls_id = gt_classes[k] - 1
+            cx = (box[0] - xmin) * (width - 1) / (xmax - xmin)
+            cy = (box[1] - ymin) * (length - 1) / (ymax - ymin)
+            lx = box[4] * (width - 1) / (xmax - xmin)
+            ly = box[3] * (length - 1) / (ymax - ymin)
+
+            if lx > 0 and ly > 0:
+                radius = gaussian_radius((ly, lx))
+                radius = max(0, int(radius))
+                ct = np.array([cx, cy], dtype=np.float32)
+                ct_int = ct.astype(np.int32)
+                if cls_id < 0:
+                    ignore_id = [_ for _ in range(num_classes)] \
+                                    if cls_id == - 1 else  [- cls_id - 2]
+                    
+                    for cc in ignore_id:
+                        draw_gaussian(hm[cc], ct, radius)
+                    hm[ignore_id, ct_int[1], ct_int[0]] = 0.9999
+                    continue
+                draw_gaussian(hm[cls_id], ct, radius)
+
+                if alpha < np.pi / 6. or alpha > 5 * np.pi / 6.:
+                    rotbin[k, 0] = 1
+                    rotres[k, 0] = alpha - (-0.5 * np.pi)    
+                if alpha > -np.pi / 6. or alpha < -5 * np.pi / 6.:
+                    rotbin[k, 1] = 1
+                    rotres[k, 1] = alpha - (0.5 * np.pi)
+
+                dim[k] = box[3:6] #w,l,h
+                ind[k] = ct_int[1] * width + ct_int[0]
+                
+                reg[k] = ct - ct_int
+                reg_mask[k] = 1 #if not training else 0
+                rot_mask[k] = 1
+
         example.update({
-            'labels': targets_dict['labels'],
-            'reg_targets': targets_dict['bbox_targets'],
-            'reg_weights': targets_dict['bbox_outside_weights'],
+                'hm': hm,
+                'dim': dim,
+                'ind': ind,
+                'rotbin': rotbin,
+                'rotres': rotres,
+                'reg_mask': reg_mask,
+                'rot_mask': rot_mask,
+                'reg' : reg
         })
+        
+    #============================ NEW CODE ===================================
     return example
 
 
@@ -354,7 +392,7 @@ def _read_and_prep_v9(info, root_path, num_point_features, prep_func):
     example = prep_func(input_dict=input_dict)
     example["image_idx"] = image_idx
     example["image_shape"] = input_dict["image_shape"]
-    if "anchors_mask" in example:
-        example["anchors_mask"] = example["anchors_mask"].astype(np.uint8)
+    # if "anchors_mask" in example:
+    #     example["anchors_mask"] = example["anchors_mask"].astype(np.uint8)
     return example
 

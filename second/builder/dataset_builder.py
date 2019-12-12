@@ -99,7 +99,10 @@ def build(input_reader_config,
         remove_points_after_sample=cfg.remove_points_after_sample,
         remove_environment=cfg.remove_environment,
         use_group_id=cfg.use_group_id,
-        out_size_factor=out_size_factor)
+        out_size_factor=out_size_factor,
+        max_objs=model_config.nms_post_max_size)
+
+
     dataset = KittiDataset(
         info_path=cfg.kitti_info_path,
         root_path=cfg.kitti_root_path,

@@ -68,17 +68,20 @@ def example_convert_to_torch(example, dtype=torch.float32,
     device = device or torch.device("cuda:0")
     example_torch = {}
     float_names = [
-        "voxels", "anchors", "reg_targets", "reg_weights", "bev_map", "rect",
-        "Trv2c", "P2"
+        "voxels", "anchors", "reg_targets", "reg_weights", "bev_map", 
+         "rect", "Trv2c", "P2", "hm", "dim", "rotres", "reg"
     ]
 
     for k, v in example.items():
         if k in float_names:
             example_torch[k] = torch.as_tensor(v, dtype=dtype, device=device)
+        elif k in ["rotbin", "ind"]:
+            example_torch[k] = torch.as_tensor(
+                v, dtype=torch.int64, device=device)
         elif k in ["coordinates", "labels", "num_points"]:
             example_torch[k] = torch.as_tensor(
                 v, dtype=torch.int32, device=device)
-        elif k in ["anchors_mask"]:
+        elif k in ["anchors_mask", "rot_mask", "reg_mask"]:
             example_torch[k] = torch.as_tensor(
                 v, dtype=torch.uint8, device=device)
         else:
@@ -233,6 +236,8 @@ def train(config_path,
                 steps = train_cfg.steps % train_cfg.steps_per_eval
             else:
                 steps = train_cfg.steps_per_eval
+
+            total_avg = hm_avg = dim_avg = rot_avg = off_avg = 0
             for step in range(steps):
                 lr_scheduler.step()
                 try:
@@ -245,21 +250,17 @@ def train(config_path,
                     example = next(data_iter)
                 example_torch = example_convert_to_torch(example, float_dtype)
 
-                batch_size = example["anchors"].shape[0]
+                batch_size = example["image_idx"].shape[0]
                 ret_dict = net(example_torch)
 
-                # box_preds = ret_dict["box_preds"]
-                cls_preds = ret_dict["cls_preds"]
-                loss = ret_dict["loss"].mean()
-                cls_loss_reduced = ret_dict["cls_loss_reduced"].mean()
-                loc_loss_reduced = ret_dict["loc_loss_reduced"].mean()
-                cls_pos_loss = ret_dict["cls_pos_loss"]
-                cls_neg_loss = ret_dict["cls_neg_loss"]
-                loc_loss = ret_dict["loc_loss"]
-                cls_loss = ret_dict["cls_loss"]
-                dir_loss_reduced = ret_dict["dir_loss_reduced"]
-                cared = ret_dict["cared"]
-                labels = example_torch["labels"]
+                loss = ret_dict["loss"]
+                total_avg += ret_dict["loss"]
+                hm_avg += ret_dict["hm_loss"]
+                dim_avg += ret_dict["dim_loss"]
+                rot_avg += ret_dict["rot_loss"]
+                off_avg += ret_dict["off_loss"]
+
+
                 if train_cfg.enable_mixed_precision:
                     loss *= loss_scale
                 loss.backward()
@@ -267,47 +268,23 @@ def train(config_path,
                 mixed_optimizer.step()
                 mixed_optimizer.zero_grad()
                 net.update_global_step()
-                net_metrics = net.update_metrics(cls_loss_reduced,
-                                                 loc_loss_reduced, cls_preds,
-                                                 labels, cared)
-
+                
                 step_time = (time.time() - t)
                 t = time.time()
-                metrics = {}
-                num_pos = int((labels > 0)[0].float().sum().cpu().numpy())
-                num_neg = int((labels == 0)[0].float().sum().cpu().numpy())
-                if 'anchors_mask' not in example_torch:
-                    num_anchors = example_torch['anchors'].shape[1]
-                else:
-                    num_anchors = int(example_torch['anchors_mask'][0].sum())
+                
                 global_step = net.get_global_step()
+                metrics = {}
                 if global_step % display_step == 0:
-                    loc_loss_elem = [
-                        float(loc_loss[:, :, i].sum().detach().cpu().numpy() /
-                              batch_size) for i in range(loc_loss.shape[-1])
-                    ]
                     metrics["step"] = global_step
                     metrics["steptime"] = step_time
-                    metrics.update(net_metrics)
                     metrics["loss"] = {}
-                    metrics["loss"]["loc_elem"] = loc_loss_elem
-                    metrics["loss"]["cls_pos_rt"] = float(
-                        cls_pos_loss.detach().cpu().numpy())
-                    metrics["loss"]["cls_neg_rt"] = float(
-                        cls_neg_loss.detach().cpu().numpy())
-                    # if unlabeled_training:
-                    #     metrics["loss"]["diff_rt"] = float(
-                    #         diff_loc_loss_reduced.detach().cpu().numpy())
-                    if model_cfg.use_direction_classifier:
-                        metrics["loss"]["dir_rt"] = float(
-                            dir_loss_reduced.detach().cpu().numpy())
-                    metrics["num_vox"] = int(example_torch["voxels"].shape[0])
-                    metrics["num_pos"] = int(num_pos)
-                    metrics["num_neg"] = int(num_neg)
-                    metrics["num_anchors"] = int(num_anchors)
-                    metrics["lr"] = float(
-                        mixed_optimizer.param_groups[0]['lr'])
-                    metrics["image_idx"] = example['image_idx'][0]
+                    metrics["loss"]["total"] = total_avg / display_step
+                    metrics["loss"]["hm"] = hm_avg / display_step
+                    metrics["loss"]["dim"] = dim_avg / display_step
+                    metrics["loss"]["rot"] = rot_avg / display_step
+                    metrics["loss"]["off"] = off_avg / display_step
+
+                    total_avg = hm_avg = dim_avg = rot_avg = off_avg = 0
                     flatted_metrics = flat_nested_json_dict(metrics)
                     flatted_summarys = flat_nested_json_dict(metrics, "/")
                     for k, v in flatted_summarys.items():
@@ -316,9 +293,12 @@ def train(config_path,
                             writer.add_scalars(k, v, global_step)
                         else:
                             writer.add_scalar(k, v, global_step)
+
                     metrics_str_list = []
                     for k, v in flatted_metrics.items():
-                        if isinstance(v, float):
+                        if isinstance(v, int):
+                            metrics_str_list.append(f"{k}={v}")
+                        elif isinstance(v, float):
                             metrics_str_list.append(f"{k}={v:.3}")
                         elif isinstance(v, (list, tuple)):
                             if v and isinstance(v[0], float):
@@ -327,10 +307,11 @@ def train(config_path,
                             else:
                                 metrics_str_list.append(f"{k}={v}")
                         else:
-                            metrics_str_list.append(f"{k}={v}")
+                            metrics_str_list.append(f"{k}={v:.3f}")
                     log_str = ', '.join(metrics_str_list)
                     print(log_str, file=logf)
                     print(log_str)
+
                 ckpt_elasped_time = time.time() - ckpt_start_time
                 if ckpt_elasped_time > train_cfg.save_checkpoints_secs:
                     torchplus.train.save_models(model_dir, [net, optimizer],
@@ -439,8 +420,7 @@ def _predict_kitti_to_file(net,
             scores = preds_dict["scores"].data.cpu().numpy()
             box_preds_lidar = preds_dict["box3d_lidar"].data.cpu().numpy()
             # write pred to file
-            box_preds = box_preds[:, [0, 1, 2, 4, 5, 3,
-                                      6]]  # lhw->hwl(label file format)
+            box_preds = box_preds[:, [0, 1, 2, 4, 5, 3, 6]]  # lhw->hwl(label file format)
             label_preds = preds_dict["label_preds"].data.cpu().numpy()
             # label_preds = np.zeros([box_2d_preds.shape[0]], dtype=np.int32)
             result_lines = []

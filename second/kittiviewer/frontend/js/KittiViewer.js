@@ -1,10 +1,10 @@
 var KittiViewer = function (pointCloud, logger, imageCanvas) {
-    this.rootPath = "/path/to/kitti";
-    this.infoPath = "/path/to/infos.pkl";
-    this.detPath = "/path/to/results.pkl";
-    this.backend = "http://127.0.0.1:7000";
-    this.checkpointPath = "/path/to/tckpt";
-    this.configPath = "/path/to/config";
+    this.rootPath = "/home/scratch/anirudds/data/";
+    this.infoPath = "/home/scratch/anirudds/data/kitti_infos_trainval.pkl";
+    this.detPath = "/zfsauton2/home/anirudds/model_base/eval_results/step_296960/result.pkl";
+    this.backend = "http://127.0.0.1:16666";
+    this.checkpointPath = "/zfsauton2/home/anirudds/model_car_final/voxelnet-296960.tckpt";
+    this.configPath = "/zfsauton2/home/anirudds/pointPillars/second/configs/pointpillars/car/xyres_16.proto";
     this.drawDet = false;
     this.imageIndexes = [];
     this.imageIndex = 1;
